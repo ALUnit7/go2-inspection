@@ -1,6 +1,7 @@
 #include "LineDetector.hpp"
 #include <opencv2/imgproc.hpp>
 #include <cmath>
+#include <numeric>
 
 bool LineDetector::getLineEdge(const cv::Mat& bin, int row, int startX,
                                 int& outLeft, int& outRight) const {
@@ -41,11 +42,56 @@ bool LineDetector::getLineEdge(const cv::Mat& bin, int row, int startX,
             }
         }
     }
-
-    // P1修复：线延伸到图像边缘时用边缘代替，避免丢帧
     if (outLeft  == -1) outLeft  = 0;
     if (outRight == -1) outRight = cols - 1;
     return true;
+}
+
+bool LineDetector::linearRegress(const std::vector<cv::Point>& pts,
+                                  double& slope, double& intercept,
+                                  std::vector<bool>& valid_mask) const {
+    int n = (int)pts.size();
+    if (n < 2) return false;
+
+    // 第一次全量最小二乘
+    auto regress = [](const std::vector<cv::Point>& p,
+                      const std::vector<bool>& mask,
+                      double& a, double& b) {
+        double sx=0, sy=0, sxx=0, sxy=0; int cnt=0;
+        for (int i=0;i<(int)p.size();i++) {
+            if (!mask[i]) continue;
+            double x=p[i].y, y=p[i].x;  // row→x, cx→y
+            sx+=x; sy+=y; sxx+=x*x; sxy+=x*y; cnt++;
+        }
+        if (cnt<2) return false;
+        double denom = cnt*sxx - sx*sx;
+        if (std::abs(denom) < 1e-6) return false;
+        a = (cnt*sxy - sx*sy) / denom;
+        b = (sy - a*sx) / cnt;
+        return true;
+    };
+
+    valid_mask.assign(n, true);
+    double a, b;
+    if (!regress(pts, valid_mask, a, b)) return false;
+
+    // 剔除离群点（残差 > ransac_thresh_）
+    for (int i = 0; i < n; i++) {
+        double pred = a * pts[i].y + b;
+        if (std::abs(pts[i].x - pred) > ransac_thresh_)
+            valid_mask[i] = false;
+    }
+
+    // 第二次回归（只用内点）
+    int inliers = std::count(valid_mask.begin(), valid_mask.end(), true);
+    if (inliers < 2) {
+        // 内点太少，退回全量结果
+        valid_mask.assign(n, true);
+        slope = a; intercept = b;
+        return true;
+    }
+
+    return regress(pts, valid_mask, slope, intercept);
 }
 
 LineResult LineDetector::detectImpl(const cv::Mat& bgr, cv::Mat* vis) {
@@ -53,71 +99,79 @@ LineResult LineDetector::detectImpl(const cv::Mat& bgr, cv::Mat* vis) {
     cv::cvtColor(bgr, gray, cv::COLOR_BGR2GRAY);
     cv::threshold(gray, binary, thresh_, 255, cv::THRESH_BINARY_INV);
 
-    // 先闭运算（填充白色内部黑色空洞，抑制反光噪点）
-    cv::Mat k_close = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(close_k_, close_k_));
-    cv::dilate(binary, binary, k_close);
-    cv::erode(binary, binary, k_close);
-    // 再开运算（去除白色外部小噪点）
-    cv::Mat k_open = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(open_k_, open_k_));
-    cv::erode(binary, binary, k_open);
-    cv::dilate(binary, binary, k_open);
+    cv::Mat kc = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(close_k_,close_k_));
+    cv::Mat ko = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(open_k_, open_k_));
+    cv::dilate(binary, binary, kc); cv::erode(binary, binary, kc);
+    cv::erode(binary, binary, ko);  cv::dilate(binary, binary, ko);
 
     int h = binary.rows, w = binary.cols;
     int bot_row = h - 1;
     int top_row = (top_row_ < h) ? top_row_ : 0;
 
-    // P3修复：底部行用上一帧中点作为起始点
-    int start_cx = (last_cx_ > 0) ? last_cx_ : w / 2;
+    // 均匀采 n_rows_ 行
+    std::vector<cv::Point> pts;  // (cx, row)
+    int start_x = (last_cx_ > 0) ? last_cx_ : w / 2;
+    int cur_x   = start_x;
+    int step = (bot_row - top_row) / (n_rows_ - 1);
 
-    int botL, botR;
-    if (!getLineEdge(binary, bot_row, start_cx, botL, botR)) {
-        // 上一帧位置也失败，回退到图像中心重试
-        if (!getLineEdge(binary, bot_row, w / 2, botL, botR))
-            return {0, 0, 0, 0, false, false};
+    int botL = 0, botR = w-1;  // 底部行线宽
+
+    for (int i = 0; i < n_rows_; i++) {
+        int row = bot_row - i * step;
+        if (row < 0) break;
+        int L, R;
+        if (getLineEdge(binary, row, cur_x, L, R)) {
+            int cx = (L + R) / 2;
+            pts.push_back({cx, row});
+            cur_x = cx;  // 跟随
+            if (i == 0) { botL = L; botR = R; }
+        }
     }
 
+    if (pts.empty()) return {0, 0, 0, 0, false, false};
+
+    // 线性回归
+    double slope = 0, intercept = pts[0].x;
+    std::vector<bool> valid_mask;
+    bool reg_ok = (pts.size() >= 2) && linearRegress(pts, slope, intercept, valid_mask);
+
+    // 底部行预测中点
+    double bot_cx = slope * bot_row + intercept;
+    last_cx_ = (int)bot_cx;
+
+    // angle：斜率转角度（slope = dx/dy，与 atan2 一致）
+    double angle  = -std::atan2(slope, 1.0) * 180.0 / CV_PI;
+    double offset = -(bot_cx - w / 2.0);
     int line_width = botR - botL;
-    cv::Point midBot((botL + botR) / 2, bot_row);
-    last_cx_ = midBot.x;  // 更新历史位置
 
-    int topL, topR;
-    bool top_ok = getLineEdge(binary, top_row, midBot.x, topL, topR);
-
-    double angle = 0, length = 0;
-    cv::Point midTop(midBot.x, top_row);  // 默认：顶部中点与底部对齐
-
-    if (top_ok) {
-        midTop = cv::Point((topL + topR) / 2, top_row);
-        double dx = midBot.x - midTop.x;
-        double dy = midBot.y - midTop.y;
-        angle  = -std::atan2(dx, dy) * 180.0 / CV_PI;
-        length = std::sqrt(dx * dx + dy * dy);
-    }
-    // P2修复：顶部行失败时 angle=0，只用 offset 控制，不丢帧
-
-    // 横向偏移：线在右侧为负（需右转），左侧为正（需左转）
-    double offset = -(midBot.x - w / 2.0);
+    // top_ok：内点数超过一半认为回归有效
+    int inliers = reg_ok ? (int)std::count(valid_mask.begin(), valid_mask.end(), true) : 0;
+    bool top_ok = inliers >= (int)(pts.size() / 2);
 
     if (vis) {
-        if (top_ok) {
-            cv::circle(*vis, {topL, top_row}, 5, {0,0,255}, -1);
-            cv::circle(*vis, {topR, top_row}, 5, {0,0,255}, -1);
-            cv::line(*vis, {topL,top_row}, {botL,bot_row}, {0,0,255}, 2);
-            cv::line(*vis, {topR,top_row}, {botR,bot_row}, {0,0,255}, 2);
-            cv::line(*vis, midTop, midBot, {255,0,0}, 2);
+        // 画所有采样点
+        for (int i = 0; i < (int)pts.size(); i++) {
+            cv::Scalar c = (reg_ok && valid_mask[i]) ? cv::Scalar{0,255,0} : cv::Scalar{0,0,255};
+            cv::circle(*vis, pts[i], 5, c, -1);
         }
-        cv::circle(*vis, {botL, bot_row}, 5, {0,255,0}, -1);
-        cv::circle(*vis, {botR, bot_row}, 5, {0,255,0}, -1);
-        // 图像中心线
-        cv::line(*vis, {w/2, 0}, {w/2, h}, {0,200,0}, 1);
+        // 画回归直线（从 top_row 到 bot_row）
+        if (reg_ok) {
+            cv::Point p1((int)(slope * top_row + intercept), top_row);
+            cv::Point p2((int)bot_cx, bot_row);
+            cv::line(*vis, p1, p2, {255,0,0}, 2);
+        }
+        cv::line(*vis, {w/2,0}, {w/2,h}, {0,200,0}, 1);
         cv::putText(*vis, "Angle:" + std::to_string(angle).substr(0,6),
                     {20,40}, cv::FONT_HERSHEY_SIMPLEX, 1, {255,255,0}, 2);
         cv::putText(*vis, "Offset:" + std::to_string((int)offset),
                     {20,80}, cv::FONT_HERSHEY_SIMPLEX, 1, {0,255,255}, 2);
-        cv::putText(*vis, top_ok ? "TOP:OK" : "TOP:LOST",
+        cv::putText(*vis, "W:" + std::to_string(line_width) +
+                    " IN:" + std::to_string(inliers) + "/" + std::to_string(pts.size()),
                     {20,120}, cv::FONT_HERSHEY_SIMPLEX, 0.8,
                     top_ok ? cv::Scalar{0,255,0} : cv::Scalar{0,0,255}, 2);
     }
+
+    double length = std::abs(bot_row - top_row) / std::cos(slope);
     return {angle, offset, length, line_width, true, top_ok};
 }
 
