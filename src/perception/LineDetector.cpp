@@ -107,6 +107,7 @@ LineResult LineDetector::detectImpl(const cv::Mat& bgr, cv::Mat* vis) {
     int h = binary.rows, w = binary.cols;
     int bot_row = h - 1;
     int top_row = (top_row_ < h) ? top_row_ : 0;
+    int x_min = w / 10, x_max = w * 9 / 10;  // 中心 80% 范围
 
     std::vector<cv::Point> pts;
     int botL = 0, botR = w-1;
@@ -121,14 +122,17 @@ LineResult LineDetector::detectImpl(const cv::Mat& bgr, cv::Mat* vis) {
         int L, R;
         if (getLineEdge(binary, row, cur_x, L, R)) {
             int cx = (L + R) / 2;
-            pts.push_back({cx, row});
             cur_x = cx;
             if (i == 0) { botL = L; botR = R; }
+            if (cx >= x_min && cx <= x_max)
+                pts.push_back({cx, row});
         }
     }
 
+    // 记录底部组边界，用于后续统计顶部内点数
+    int top_pts_start = (int)pts.size();
+
     // 顶部组：0 ~ top_row，从图像中心出发独立采样
-    // 用于十字路口时纳入过了交叉点的正常直线点
     int top_step = (top_row > 0 && n_rows_ > 1) ? top_row / (n_rows_ - 1) : 1;
     int top_cx = w / 2;
     for (int i = 1; i < n_rows_; i++) {
@@ -137,8 +141,9 @@ LineResult LineDetector::detectImpl(const cv::Mat& bgr, cv::Mat* vis) {
         int L, R;
         if (getLineEdge(binary, row, top_cx, L, R)) {
             int cx = (L + R) / 2;
-            pts.push_back({cx, row});
             top_cx = cx;
+            if (cx >= x_min && cx <= x_max)
+                pts.push_back({cx, row});
         }
     }
 
@@ -158,9 +163,13 @@ LineResult LineDetector::detectImpl(const cv::Mat& bgr, cv::Mat* vis) {
     double offset = -(bot_cx - w / 2.0);
     int line_width = botR - botL;
 
-    // top_ok：内点数超过一半认为回归有效
-    int inliers = reg_ok ? (int)std::count(valid_mask.begin(), valid_mask.end(), true) : 0;
-    bool top_ok = inliers >= (int)(pts.size() / 2);
+    // top_ok：顶部组有 >= 2 个内点才认为前方可见（直角弯时为false）
+    int top_inliers = 0;
+    if (reg_ok) {
+        for (int i = top_pts_start; i < (int)pts.size(); i++)
+            if (valid_mask[i]) top_inliers++;
+    }
+    bool top_ok = top_inliers >= 2;
 
     if (vis) {
         // 画所有采样点
@@ -180,7 +189,7 @@ LineResult LineDetector::detectImpl(const cv::Mat& bgr, cv::Mat* vis) {
         cv::putText(*vis, "Offset:" + std::to_string((int)offset),
                     {20,80}, cv::FONT_HERSHEY_SIMPLEX, 1, {0,255,255}, 2);
         cv::putText(*vis, "W:" + std::to_string(line_width) +
-                    " IN:" + std::to_string(inliers) + "/" + std::to_string(pts.size()),
+                    " TOP:" + std::to_string(top_inliers),
                     {20,120}, cv::FONT_HERSHEY_SIMPLEX, 0.8,
                     top_ok ? cv::Scalar{0,255,0} : cv::Scalar{0,0,255}, 2);
     }

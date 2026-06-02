@@ -19,9 +19,8 @@ static const int   THRESH      = 67;
 static const int   CLOSE_K     = 12;  // 闭运算核（填充白色内黑色空洞）
 static const int   OPEN_K      = 5;   // 开运算核（去除外部噪点）
 static const float KP          = 0.05f;
-static const float KP2         = 0.001f;
-static const float SPEED       = 0.21f;
-static const int   CROSS_WIDTH  = 300;  // 线宽超过此值判断为十字路口（像素）
+static const float KP2         = 0.003f;
+static const float SPEED       = 0.20f;
 static const float EXPOSURE_US = -1;
 static const float GAIN        = -1;
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,26 +67,19 @@ int main(int argc, char** argv) {
         float vyaw = 0, vy = 0;
         if (res.valid) {
             lost = 0;
-            if (res.line_width > CROSS_WIDTH) {
-                // 十字路口：线宽异常，直行忽略控制量
-                sc.Move(SPEED, 0, 0);
-                printf("angle=%6.2f  offset=%6.1f  width=%d  [CROSS]\n",
-                       res.angle, res.offset, res.line_width);
+            vyaw = -(float)(res.angle  * KP);
+            vy   =  (float)(res.offset * KP2);
+            if (res.top_ok) {
+                sc.Move(SPEED, vy, vyaw);
+                printf("angle=%6.2f  offset=%6.1f  vy=%6.3f  vyaw=%6.3f  [OK]\n",
+                       res.angle, res.offset, vy, vyaw);
             } else {
-                vyaw = -(float)(res.angle  * KP);
-                vy   =  (float)(res.offset * KP2);
-                if (res.top_ok) {
-                    sc.Move(SPEED, vy, vyaw);
-                    printf("angle=%6.2f  offset=%6.1f  vy=%6.3f  vyaw=%6.3f  [OK]\n",
-                           res.angle, res.offset, vy, vyaw);
-                } else {
-                    sc.Move(SPEED * 0.3f, 0, last_vyaw);
-                    vyaw = last_vyaw;
-                    printf("angle=%6.2f  offset=%6.1f  vy=%6.3f  vyaw=%6.3f  [TURN]\n",
-                           res.angle, res.offset, vy, vyaw);
-                }
-                last_vyaw = vyaw;
+                sc.Move(SPEED * 0.3f, 0, last_vyaw);
+                vyaw = last_vyaw;
+                printf("angle=%6.2f  offset=%6.1f  vy=%6.3f  vyaw=%6.3f  [TURN]\n",
+                       res.angle, res.offset, vy, vyaw);
             }
+            last_vyaw = vyaw;
         } else {
             if (++lost > 30) { sc.StopMove(); printf("Line lost!\n"); }
         }
