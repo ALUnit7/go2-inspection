@@ -108,23 +108,37 @@ LineResult LineDetector::detectImpl(const cv::Mat& bgr, cv::Mat* vis) {
     int bot_row = h - 1;
     int top_row = (top_row_ < h) ? top_row_ : 0;
 
-    // 均匀采 n_rows_ 行
-    std::vector<cv::Point> pts;  // (cx, row)
+    std::vector<cv::Point> pts;
+    int botL = 0, botR = w-1;
+
+    // 底部组：top_row ~ bot_row，逐行跟随
     int start_x = (last_cx_ > 0) ? last_cx_ : w / 2;
     int cur_x   = start_x;
-    int step = (bot_row - top_row) / (n_rows_ - 1);
-
-    int botL = 0, botR = w-1;  // 底部行线宽
-
+    int step = (n_rows_ > 1) ? (bot_row - top_row) / (n_rows_ - 1) : 1;
     for (int i = 0; i < n_rows_; i++) {
         int row = bot_row - i * step;
-        if (row < 0) break;
+        if (row < top_row) break;
         int L, R;
         if (getLineEdge(binary, row, cur_x, L, R)) {
             int cx = (L + R) / 2;
             pts.push_back({cx, row});
-            cur_x = cx;  // 跟随
+            cur_x = cx;
             if (i == 0) { botL = L; botR = R; }
+        }
+    }
+
+    // 顶部组：0 ~ top_row，从图像中心出发独立采样
+    // 用于十字路口时纳入过了交叉点的正常直线点
+    int top_step = (top_row > 0 && n_rows_ > 1) ? top_row / (n_rows_ - 1) : 1;
+    int top_cx = w / 2;
+    for (int i = 1; i < n_rows_; i++) {
+        int row = top_row - i * top_step;
+        if (row < 0) break;
+        int L, R;
+        if (getLineEdge(binary, row, top_cx, L, R)) {
+            int cx = (L + R) / 2;
+            pts.push_back({cx, row});
+            top_cx = cx;
         }
     }
 
