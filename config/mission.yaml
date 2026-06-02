@@ -1,0 +1,33 @@
+# 比赛任务配置
+network:
+  interface: enp108s0   # 连接 Go2 的网卡名
+
+robot:
+  move_speed: 0.4       # 默认前进速度 m/s
+  turn_speed: 0.8       # 默认转向速度 rad/s
+  sdk_timeout: 10.0     # SportClient 超时秒数
+
+# 各任务参数
+tasks:
+  line_follow:
+    speed: 0.3
+    kp: 0.005           # 偏差→转向比例系数
+
+  jump:
+    approach_speed: 0.5
+    jump_trigger_dist: 0.5  # 距障碍物触发跳跃距离(m)，预留
+
+  obstacle_avoid:
+    enabled: true
+
+  climb_stairs:
+    speed: 0.2
+
+  vision:
+    model_path: models/yolo.onnx
+    conf_thresh: 0.5
+    input_size: 640
+
+  arm:
+    ip: ""              # 机械臂 IP，待定
+    port: 0
