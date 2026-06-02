@@ -1,5 +1,7 @@
 build/
 *.onnx
 *.pt
+*.so
+*.so.*
 frames/
 .idea/

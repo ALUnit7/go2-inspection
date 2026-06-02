@@ -12,6 +12,7 @@ function(add_test_exe name)
 endfunction()
 
 add_test_exe(t_vy_test)
+add_test_exe(recover_joystick)
 add_test_exe(t2_basic_motion)
 add_test_exe(t3_jump)
 add_test_exe(t4_obstacle_avoid)
@@ -35,3 +36,19 @@ target_link_libraries(t9_line_follow PRIVATE ${OpenCV_LIBS} ${HIK_LIBS})
 add_executable(t10_line_follow_robot t10_line_follow_robot.cpp)
 target_include_directories(t10_line_follow_robot PRIVATE ${OpenCV_INCLUDE_DIRS} ../src ${HIK_INC})
 target_link_libraries(t10_line_follow_robot PRIVATE unitree_sdk2 ${OpenCV_LIBS} ${HIK_LIBS})
+
+# t11: ArUco Tag 检测（GO2 前置摄像头）
+add_executable(t11_aruco_tag t11_aruco_tag.cpp)
+target_include_directories(t11_aruco_tag PRIVATE ${OpenCV_INCLUDE_DIRS} ../src)
+target_link_libraries(t11_aruco_tag PRIVATE unitree_sdk2 ${OpenCV_LIBS})
+
+# t12: 警示标志识别（GO2 前置摄像头）
+add_executable(t12_sign_detect t12_sign_detect.cpp)
+target_include_directories(t12_sign_detect PRIVATE ${OpenCV_INCLUDE_DIRS} ../src)
+target_link_libraries(t12_sign_detect PRIVATE unitree_sdk2 ${OpenCV_LIBS})
+
+# t13: YOLO11 警示标志识别（GO2 前置摄像头，需 ONNX Runtime）
+add_executable(t13_yolo_sign t13_yolo_sign.cpp)
+target_include_directories(t13_yolo_sign PRIVATE ${OpenCV_INCLUDE_DIRS} ../src /usr/local/include)
+target_link_libraries(t13_yolo_sign PRIVATE unitree_sdk2 ${OpenCV_LIBS}
+    /usr/local/lib/libonnxruntime.so)
