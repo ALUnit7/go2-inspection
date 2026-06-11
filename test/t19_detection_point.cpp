@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include "../src/perception/HikCamera.hpp"
 #include "../src/perception/HikCamera.cpp"
+#include "../src/perception/LineDetector.hpp"
+#include "../src/perception/LineDetector.cpp"
 #include "../src/perception/YoloDetector.hpp"
 #include "../src/perception/YoloDetector.cpp"
 
@@ -23,10 +25,16 @@
 static const std::string MODEL_PATH = "/home/wzl/GO2_RCOM/models/warning_sign.onnx";
 static const std::vector<std::string> CLASSES = {"radiation","electric","oxidizer"};
 static const float CONF_THRESH     = 0.25f;
-static const float FOLLOW_SPEED    = 0.15f;  // 跟随红色圆时的速度
+static const float FOLLOW_SPEED    = 0.15f;
+static const float FOLLOW_KP       = 0.05f;
+static const float FOLLOW_KP2      = 0.003f;
+static const int   THRESH           = 67;
+static const int   CLOSE_K          = 12;
+static const int   OPEN_K           = 5;
 static const float TURN_SPEED      = 0.5f;
 static const float YAW_TURN_DEG    = 85.0f;
-static const int   YOLO_TIMEOUT_FR = 150;    // 50Hz * 3s
+static const int   YOLO_TIMEOUT_FR = 150;
+static const int   AFTER_CIRCLE_FR = 165;  // 圆消失后继续寻迹帧数（~0.5m @ 0.15m/s @ 50Hz）
 // 红色圆 HSV
 static const int H1_LO=0,H1_HI=15, H2_LO=163,H2_HI=179;
 static const int S_LO=100, V_LO=80, MIN_AREA=3000;
@@ -81,16 +89,17 @@ int main(int argc, char** argv) {
     sc.FreeWalk();
 
     // Phase 说明：
-    // FOLLOW      → 寻迹，等红色圆出现
-    // CIRCLE_SEEN → 圆已出现，继续走，等圆消失（圆到机身下方）
-    // TURNING_L   → 左转90°
-    // RECOGNIZE   → YOLO识别
-    // ACTING      → 执行动作
-    // TURNING_R   → 右转90°
-    enum Phase { FOLLOW, CIRCLE_SEEN, TURNING_L, RECOGNIZE, ACTING, TURNING_R, DONE };
+    // FOLLOW       → 寻迹（angle+offset控制），等红色圆出现
+    // CIRCLE_SEEN  → 圆已出现，继续寻迹，等圆消失
+    // AFTER_CIRCLE → 圆消失后继续寻迹约0.5m
+    // TURNING_L    → 左转90°
+    // RECOGNIZE    → YOLO识别
+    // ACTING       → 执行动作
+    // TURNING_R    → 右转90°
+    enum Phase { FOLLOW, CIRCLE_SEEN, AFTER_CIRCLE, TURNING_L, RECOGNIZE, ACTING, TURNING_R, DONE };
     Phase phase = FOLLOW;
     float yaw_start=0;
-    int sign_type=-1, recognize_ticks=0;
+    int sign_type=-1, recognize_ticks=0, after_ticks=0;
 
     printf("Running. Hik=red circle(ground), GO2cam=YOLO(sign).\n");
     std::vector<uint8_t> buf;
@@ -101,21 +110,42 @@ int main(int argc, char** argv) {
         bool hik_ok = hik.grab(hik_frame);
         bool circle = hik_ok && detectRedCircle(hik_frame);
 
+        // 寻迹辅助（FOLLOW/CIRCLE_SEEN/AFTER_CIRCLE 阶段共用）
+        LineDetector line_det(THRESH, 800, CLOSE_K, OPEN_K);
+        auto doLineFollow = [&]() {
+            LineResult r = line_det.detect(hik_frame);
+            if (r.valid) {
+                float vyaw = -(float)(r.angle  * FOLLOW_KP);
+                float vy   =  (float)(r.offset * FOLLOW_KP2);
+                sc.Move(FOLLOW_SPEED, vy, vyaw);
+            } else {
+                sc.Move(FOLLOW_SPEED, 0, 0);
+            }
+        };
+
         switch (phase) {
         case FOLLOW:
-            sc.Move(FOLLOW_SPEED, 0, 0);
+            doLineFollow();
             if (circle) {
-                printf("Red circle appeared, continue walking until it passes under body\n");
+                printf("Red circle appeared, continue line-following until it passes\n");
                 phase = CIRCLE_SEEN;
             }
             break;
 
         case CIRCLE_SEEN:
-            // 继续走，等圆消失（已经到机身下方）
-            sc.Move(FOLLOW_SPEED, 0, 0);
+            doLineFollow();
             if (!circle) {
+                printf("Circle passed. Continue ~0.5m more then turn.\n");
+                after_ticks = 0;
+                phase = AFTER_CIRCLE;
+            }
+            break;
+
+        case AFTER_CIRCLE:
+            doLineFollow();
+            if (++after_ticks >= AFTER_CIRCLE_FR) {
                 sc.StopMove(); usleep(500000);
-                printf("Circle passed under body. Turning left.\n");
+                printf("0.5m done. Turning left.\n");
                 yaw_start = yaw;
                 phase = TURNING_L;
             }
