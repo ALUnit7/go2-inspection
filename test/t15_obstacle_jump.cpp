@@ -19,8 +19,8 @@ static const int   THRESH      = 67;
 static const int   CLOSE_K     = 12;
 static const int   OPEN_K      = 5;
 static const int   NEAR_ROW    = 1000;  // 触发行，越大离狗越近才触发
-static const int   FAR_ROW     = 700;
-static const float W_THRESH    = 0.10f; // 白色占比阈值
+static const int   FAR_ROW     = 740;
+static const float W_THRESH    = 0.50f; // 白色占比阈值
 static const int   CONFIRM     = 3;     // 确认帧数
 static const int   LAND_WAIT_MS = 2000; // 跳跃后等待落地时间(ms)
 // ─────────────────────────────────────────────────────────────────────────────

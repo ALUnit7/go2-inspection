@@ -16,8 +16,8 @@ static const float AVOID_SPEED    = 0.25f;
 static const int   STABLE_THRESH  = 20;   // 线恢复稳定帧数
 // ────────────────────────────────────────────────────────────────────────────
 void StateObstacleAvoid::enter(RobotContext& ctx) {
-    std::cout << "[ObstacleAvoid] enter, FreeAvoid ON\n";
-    ctx.sport->freeWalk();
+    std::cout << "[ObstacleAvoid] PLACEHOLDER: stopped (nav process not connected)\n";
+    ctx.sport->stop();
     // 尝试绑定 UDP 接收导航速度指令
     sock_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock_fd_ >= 0) {
@@ -31,6 +31,9 @@ void StateObstacleAvoid::enter(RobotContext& ctx) {
     stable_cnt_ = 0; nav_online_ = false;
 }
 int StateObstacleAvoid::update(RobotContext& ctx) {
+    // TODO: 接入 ROS2 导航进程后启用 UDP 逻辑
+    // 当前占位：停止等待人工接管
+    return STATE_STAY;
     cv::Mat frame;
     ctx.camera->grab(frame);
 

@@ -23,6 +23,7 @@ public:
 
     LineResult detect(const cv::Mat& bgr);
     LineResult detectAndDraw(cv::Mat& vis);
+    int lastCx() const { return last_cx_; }  // 上一帧底部线中心 x
 
 private:
     int    thresh_, top_row_, close_k_, open_k_;

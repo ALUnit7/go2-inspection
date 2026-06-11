@@ -30,12 +30,9 @@ void StateLineFollow::enter(RobotContext& ctx) {
 }
 
 bool StateLineFollow::detectObstacle(const cv::Mat& binary, int w) const {
-    // 底部几行白色像素骤减 → 障碍物
-    int near = std::min(binary.rows - 1, 1000);
-    int far  = std::min(near - 1, 700);
-    // 简单：检测 near 行白色像素数
-    int white = cv::countNonZero(binary.row(near));
-    return white < 30;  // 白色像素少于30px = 线断裂
+    ObstacleDetector det;
+    // 复用最后一帧的线中心（已在调用前更新到 detector.lastCx()）
+    return det.detect(binary, nullptr, w / 2);
 }
 
 bool StateLineFollow::detectRedCircle(const cv::Mat& bgr) const {
@@ -73,15 +70,17 @@ int StateLineFollow::update(RobotContext& ctx) {
     cv::dilate(binary, binary, kc); cv::erode(binary, binary, kc);
     cv::erode(binary, binary, ko);  cv::dilate(binary, binary, ko);
 
+    // ── 先做线检测（获取 last_cx_ 供障碍物检测使用）────────────────────────
+    LineDetector detector(67, 800, 12, 5);
+    LineResult res = detector.detect(frame);
+
     // ── 退出条件检测 ──────────────────────────────────────────────────────
-    if (cfg_.exit_on_obstacle && detectObstacle(binary, frame.cols))
+    // 障碍物检测：传入线中心位置，避免机器人偏移时 ROI 坍塌
+    if (cfg_.exit_on_obstacle && detectObstacle(binary, detector.lastCx()))
         return cfg_.next_state;
 
     if (cfg_.exit_on_red_circle && detectRedCircle(frame))
         return cfg_.next_state;
-
-    LineDetector detector(67, 800, 12, 5);
-    LineResult res = detector.detect(frame);
 
     if (cfg_.exit_on_line_lost && !res.valid) {
         if (++lost_frames_ > 15) return cfg_.next_state;

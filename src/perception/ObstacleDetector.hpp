@@ -12,10 +12,10 @@ class ObstacleDetector {
 public:
     explicit ObstacleDetector(const ObstacleConfig& cfg = {}) : cfg_(cfg), counter_(0) {}
 
-    // binary: THRESH_BINARY_INV 后的二值图（黑线=白255，背景=黑0）
+    // binary: THRESH_BINARY_INV 后的二值图
+    // start_x: 扫描起点（传入 LineDetector 的 last_cx_，-1=用图像中心）
     // vis: 不为空则画出 ROI 梯形
-    // 返回 true = 检测到障碍物
-    bool detect(const cv::Mat& binary, cv::Mat* vis = nullptr);
+    bool detect(const cv::Mat& binary, cv::Mat* vis = nullptr, int start_x = -1);
 
     void reset() { counter_ = 0; }
     ObstacleConfig& config() { return cfg_; }

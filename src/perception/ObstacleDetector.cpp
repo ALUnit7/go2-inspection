@@ -1,19 +1,16 @@
 #include "ObstacleDetector.hpp"
 #include <opencv2/imgproc.hpp>
 
-bool ObstacleDetector::detect(const cv::Mat& binary, cv::Mat* vis) {
+bool ObstacleDetector::detect(const cv::Mat& binary, cv::Mat* vis, int start_x) {
     int h = binary.rows, w = binary.cols;
     int nr = std::min(cfg_.near_row, h - 1);
     int fr = std::min(cfg_.far_row,  nr - 1);
-    int cx = w / 2;
+    int cx = (start_x > 0 && start_x < w) ? start_x : w / 2;  // 用线中心或图像中心
 
-    // 在两行上找线的左右边界
     auto scan_row = [&](int row, int& L, int& R) {
         L = 0; R = w - 1;
-        // 从中心向左找左边界
         for (int x = cx; x >= 0; x--)
             if (binary.at<uchar>(row, x) == 0) { L = x + 1; break; }
-        // 从中心向右找右边界
         for (int x = cx; x < w; x++)
             if (binary.at<uchar>(row, x) == 0) { R = x - 1; break; }
     };

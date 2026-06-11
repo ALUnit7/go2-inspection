@@ -26,10 +26,12 @@ int main() {
     int thresh    = 67;
     int close_k   = 12;
     int open_k    = 5;
-    int near_row  = 1000;  // 近处行：越大越靠底部，触发越晚（离狗更近）
-    int far_row   = 700;   // 远处行
-    int w_thresh  = 10;    // 白色占比阈值 × 100（即 0.10）
-    int confirm   = 3;     // 确认帧数
+    int near_row  = 1000;
+    int far_row   = 740;
+    int w_thresh  = 50;
+    int confirm   = 3;
+    int exposure  = 0;    // 0=自动，>0=固定值（单位：100us，如50=5ms）
+    int gain_x10  = 0;    // 0=自动，>0=固定增益（单位：0.1，如20=2.0）
 
     const char* WIN = "Obstacle Detect";
     cv::namedWindow(WIN);
@@ -40,10 +42,22 @@ int main() {
     cv::createTrackbar("FarRow",    WIN, &far_row,  1079);
     cv::createTrackbar("WThresh%",  WIN, &w_thresh,  100);
     cv::createTrackbar("Confirm",   WIN, &confirm,    10);
+    cv::createTrackbar("Exp(x100us)",WIN,&exposure, 1000); // 0=自动，100=10ms
+    cv::createTrackbar("Gain x10",  WIN, &gain_x10,  200); // 0=自动，20=2.0
 
+    int prev_exp=-1, prev_gain=-1;
     while (g_running) {
         cv::Mat frame;
         if (!cam.grab(frame)) { usleep(20000); continue; }
+
+        if (exposure != prev_exp) {
+            cam.setExposure(exposure > 0 ? exposure * 100.f : -1);
+            prev_exp = exposure;
+        }
+        if (gain_x10 != prev_gain) {
+            cam.setGain(gain_x10 > 0 ? gain_x10 / 10.f : -1);
+            prev_gain = gain_x10;
+        }
 
         // 二值化（与 LineDetector 一致）
         cv::Mat gray, binary;
