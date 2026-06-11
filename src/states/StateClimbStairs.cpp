@@ -6,12 +6,13 @@
 // ── 调参区 ───────────────────────────────────────────────────────────────────
 static const float CLIMB_SPEED     = 0.08f;
 static const float TURN_SPEED_S    = 0.4f;
-static const float PITCH_STABLE    = 3.0f;   // pitch 稳定阈值(°)
+static const float PITCH_STABLE    = 3.0f;
+static const float PITCH_CLIMB     = 8.0f;   // pitch 超过此值确认开始上/下台阶
 static const int   STABLE_FRAMES   = 20;
 static const float YAW_TURN        = 85.0f;
 // ────────────────────────────────────────────────────────────────────────────
 void StateClimbStairs::enter(RobotContext& ctx) {
-    phase_ = CLIMB_UP; stable_cnt_ = 0;
+    phase_ = CLIMB_UP; stable_cnt_ = 0; climbing_started_ = false;
     ctx.sport->freeWalk();
     ctx.sport->move(CLIMB_SPEED, 0, 0);
     std::cout << "[Stairs] enter CLIMB_UP\n";
@@ -23,11 +24,13 @@ int StateClimbStairs::update(RobotContext& ctx) {
     switch (phase_) {
     case CLIMB_UP:
         ctx.sport->move(CLIMB_SPEED, 0, 0);
-        if (std::abs(pitch) < PITCH_STABLE) stable_cnt_++;
+        if (!climbing_started_ && std::abs(pitch) > PITCH_CLIMB)
+            climbing_started_ = true;
+        if (climbing_started_ && std::abs(pitch) < PITCH_STABLE) stable_cnt_++;
         else stable_cnt_ = 0;
         if (stable_cnt_ > STABLE_FRAMES) {
             ctx.sport->stop();
-            yaw_start_ = yaw; yaw_accum_ = 0; stable_cnt_ = 0;
+            yaw_start_ = yaw; yaw_accum_ = 0; stable_cnt_ = 0; climbing_started_ = false;
             phase_ = TURN_LEFT;
             std::cout << "[Stairs] top, TURN_LEFT\n";
         }
@@ -46,7 +49,9 @@ int StateClimbStairs::update(RobotContext& ctx) {
     }
     case CLIMB_DOWN:
         ctx.sport->move(CLIMB_SPEED, 0, 0);
-        if (std::abs(pitch) < PITCH_STABLE) stable_cnt_++;
+        if (!climbing_started_ && std::abs(pitch) > PITCH_CLIMB)
+            climbing_started_ = true;
+        if (climbing_started_ && std::abs(pitch) < PITCH_STABLE) stable_cnt_++;
         else stable_cnt_ = 0;
         if (stable_cnt_ > STABLE_FRAMES) {
             ctx.sport->stop();

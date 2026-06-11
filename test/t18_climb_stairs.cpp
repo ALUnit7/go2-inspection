@@ -22,6 +22,7 @@ static const float  APPROACH_SPEED  = 0.15f;
 static const float  CLIMB_SPEED     = 0.08f;
 static const float  TURN_SPEED      = 0.4f;
 static const float  PITCH_STABLE_DEG= 3.0f;
+static const float  PITCH_CLIMB_DEG = 8.0f;   // pitch超过此值认为开始上台阶
 static const float  TOP_WHITE_RATIO = 0.6f;
 static const float  YAW_TURN_DEG    = 85.0f;
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,6 +57,7 @@ int main(int argc, char** argv) {
     Phase phase = FOLLOW;
     float yaw_start=0, yaw_accum=0;
     int stable_count=0;
+    bool climbing_started=false;  // 是否已检测到pitch升高（开始上台阶）
 
     std::vector<std::vector<cv::Point2f>> corners;
     std::vector<int> ids;
@@ -99,13 +101,18 @@ int main(int argc, char** argv) {
         }
         case CLIMB_UP:
             sc.Move(CLIMB_SPEED,0,0);
-            if (std::abs(pitch)<PITCH_STABLE_DEG) stable_count++;
-            else stable_count=0;
-            printf("pitch=%.1f stable=%d\n",pitch,stable_count);
-            if (stable_count>20) {
+            // 必须先检测到 pitch 升高，才允许计稳定帧数
+            if (!climbing_started && std::abs(pitch) > PITCH_CLIMB_DEG)
+                climbing_started = true;
+            if (climbing_started && std::abs(pitch) < PITCH_STABLE_DEG)
+                stable_count++;
+            else
+                stable_count = 0;
+            printf("pitch=%.1f started=%d stable=%d\n", pitch, climbing_started, stable_count);
+            if (stable_count > 20) {
                 sc.StopMove(); usleep(300000);
                 printf("Top. TURN_LEFT\n");
-                yaw_start=yaw; yaw_accum=0; stable_count=0;
+                yaw_start=yaw; yaw_accum=0; stable_count=0; climbing_started=false;
                 phase=TURN_LEFT;
             }
             break;
