@@ -1,6 +1,6 @@
 // t19_detection_point: 检测平台完整流程
-// 海康相机：检测地面红色圆（寻迹中触发）
-// GO2前置摄像头：YOLO识别警示标志（转身后拍）
+// 海康相机：地面红色圆（出现→继续走→消失→停止转身）
+// GO2前置摄像头：YOLO识别警示标志（转身后拍，显示推理图像）
 // 用法: sudo ./t19_detection_point <网卡名>
 #include <unitree/robot/channel/channel_factory.hpp>
 #include <unitree/robot/go2/sport/sport_client.hpp>
@@ -22,11 +22,12 @@
 // ── 调参区 ────────────────────────────────────────────────────────────────────
 static const std::string MODEL_PATH = "/home/wzl/GO2_RCOM/models/warning_sign.onnx";
 static const std::vector<std::string> CLASSES = {"radiation","electric","oxidizer"};
-static const float CONF_THRESH    = 0.25f;
-static const float TURN_SPEED     = 0.5f;
-static const float YAW_TURN_DEG   = 85.0f;
-static const int   YOLO_TIMEOUT_S = 3;
-// 红色圆 HSV（海康相机，与 t16 一致）
+static const float CONF_THRESH     = 0.25f;
+static const float FOLLOW_SPEED    = 0.15f;  // 跟随红色圆时的速度
+static const float TURN_SPEED      = 0.5f;
+static const float YAW_TURN_DEG    = 85.0f;
+static const int   YOLO_TIMEOUT_FR = 150;    // 50Hz * 3s
+// 红色圆 HSV
 static const int H1_LO=0,H1_HI=15, H2_LO=163,H2_HI=179;
 static const int S_LO=100, V_LO=80, MIN_AREA=3000;
 static const float CIRCULARITY = 0.65f;
@@ -67,115 +68,136 @@ int main(int argc, char** argv) {
 
     unitree::robot::go2::SportClient sc;
     sc.SetTimeout(10.f); sc.Init();
-    unitree::robot::go2::VuiClient vc_light;
-    vc_light.SetTimeout(5.f); vc_light.Init();
+    unitree::robot::go2::VuiClient vui;
+    vui.SetTimeout(5.f); vui.Init();
 
-    // 海康相机：检测地面红色圆
     HikCamera hik;
     if (!hik.init()) return 1;
 
-    // GO2 前置摄像头：YOLO 识别警示标志
     unitree::robot::go2::VideoClient vcam;
     vcam.SetTimeout(3.f); vcam.Init();
 
     YoloDetector yolo(MODEL_PATH, CLASSES, CONF_THRESH);
     sc.FreeWalk();
 
-    enum Phase { FOLLOW, TURNING_LEFT, RECOGNIZE, ACTING, TURNING_RIGHT, DONE };
+    // Phase 说明：
+    // FOLLOW      → 寻迹，等红色圆出现
+    // CIRCLE_SEEN → 圆已出现，继续走，等圆消失（圆到机身下方）
+    // TURNING_L   → 左转90°
+    // RECOGNIZE   → YOLO识别
+    // ACTING      → 执行动作
+    // TURNING_R   → 右转90°
+    enum Phase { FOLLOW, CIRCLE_SEEN, TURNING_L, RECOGNIZE, ACTING, TURNING_R, DONE };
     Phase phase = FOLLOW;
-    float yaw_start=0, yaw_accum=0;
+    float yaw_start=0;
     int sign_type=-1, recognize_ticks=0;
 
-    printf("Running. Hik=red circle, GO2cam=YOLO. Ctrl+C stop\n");
+    printf("Running. Hik=red circle(ground), GO2cam=YOLO(sign).\n");
     std::vector<uint8_t> buf;
 
     while (g_running && phase != DONE) {
         float yaw = g_yaw.load();
-
-        // 海康相机取图（寻迹+红色圆检测）
         cv::Mat hik_frame;
         bool hik_ok = hik.grab(hik_frame);
+        bool circle = hik_ok && detectRedCircle(hik_frame);
 
         switch (phase) {
         case FOLLOW:
-            sc.Move(0.2f, 0, 0);
-            if (hik_ok && detectRedCircle(hik_frame)) {
-                sc.StopMove(); usleep(500000);
-                printf("Red circle detected! Turning left\n");
-                yaw_start=yaw; yaw_accum=0;
-                phase=TURNING_LEFT;
+            sc.Move(FOLLOW_SPEED, 0, 0);
+            if (circle) {
+                printf("Red circle appeared, continue walking until it passes under body\n");
+                phase = CIRCLE_SEEN;
             }
             break;
 
-        case TURNING_LEFT: {
+        case CIRCLE_SEEN:
+            // 继续走，等圆消失（已经到机身下方）
+            sc.Move(FOLLOW_SPEED, 0, 0);
+            if (!circle) {
+                sc.StopMove(); usleep(500000);
+                printf("Circle passed under body. Turning left.\n");
+                yaw_start = yaw;
+                phase = TURNING_L;
+            }
+            break;
+
+        case TURNING_L: {
             sc.Move(0, 0, TURN_SPEED);
-            float d=yaw-yaw_start; if(d>180)d-=360; if(d<-180)d+=360;
+            float d = yaw - yaw_start;
+            if (d > 180) d -= 360; if (d < -180) d += 360;
             if (std::abs(d) >= YAW_TURN_DEG) {
                 sc.StopMove(); usleep(500000);
                 printf("Turned left. YOLO recognizing...\n");
-                recognize_ticks=0; sign_type=-1;
-                phase=RECOGNIZE;
+                recognize_ticks = 0; sign_type = -1;
+                phase = RECOGNIZE;
             }
             break;
         }
 
         case RECOGNIZE: {
-            // GO2 前置摄像头取图做 YOLO 推理
+            // GO2 前置摄像头取图推理
             if (vcam.GetImageSample(buf) == 0) {
                 cv::Mat go2_frame = cv::imdecode(cv::Mat(buf), cv::IMREAD_COLOR);
                 if (!go2_frame.empty()) {
-                    auto dets = yolo.detect(go2_frame);
+                    cv::Mat vis = go2_frame.clone();
+                    auto dets = yolo.detect(go2_frame, &vis);
+                    // 显示推理图像（含检测框）
+                    cv::imshow("GO2 Cam (YOLO)", vis);
                     if (!dets.empty()) {
                         sign_type = dets[0].class_id;
                         printf("Sign=%d(%s) conf=%.2f\n",
                                sign_type, dets[0].label.c_str(), dets[0].conf);
-                        phase=ACTING; break;
+                        phase = ACTING; break;
                     }
                 }
             }
-            if (++recognize_ticks > YOLO_TIMEOUT_S*50) {
-                printf("Timeout, no sign detected\n");
-                phase=ACTING;
+            if (++recognize_ticks > YOLO_TIMEOUT_FR) {
+                printf("Timeout, no sign\n");
+                phase = ACTING;
             }
             break;
         }
 
         case ACTING:
             if (sign_type == 0) {
-                // 当心辐射：灯光闪烁三次
                 for (int i=0;i<3;i++) {
-                    vc_light.SetBrightness(10); usleep(300000);
-                    vc_light.SetBrightness(0);  usleep(300000);
+                    vui.SetBrightness(10); usleep(300000);
+                    vui.SetBrightness(0);  usleep(300000);
                 }
-                vc_light.SetBrightness(10);
+                vui.SetBrightness(10);
             } else if (sign_type == 1) {
                 sc.BalanceStand(); sleep(1); sc.Stretch(); sleep(4);
             } else {
                 sc.BalanceStand(); sleep(1); sc.Hello(); sleep(4);
             }
-            printf("Action done. Turning right\n");
-            yaw_start=yaw; yaw_accum=0;
-            phase=TURNING_RIGHT;
+            printf("Action done. Turning right.\n");
+            yaw_start = yaw;
+            phase = TURNING_R;
             break;
 
-        case TURNING_RIGHT: {
+        case TURNING_R: {
             sc.Move(0, 0, -TURN_SPEED);
-            float d=yaw-yaw_start; if(d>180)d-=360; if(d<-180)d+=360;
+            float d = yaw - yaw_start;
+            if (d > 180) d -= 360; if (d < -180) d += 360;
             if (std::abs(d) >= YAW_TURN_DEG) {
                 sc.StopMove(); printf("Done.\n");
-                phase=DONE;
+                phase = DONE;
             }
             break;
         }
         default: break;
         }
 
-        // 显示海康相机画面
+        // 海康相机画面
         if (hik_ok) {
-            cv::putText(hik_frame, "Phase:"+std::to_string(phase),
-                        {20,50}, cv::FONT_HERSHEY_SIMPLEX, 1, {0,255,255}, 2);
-            cv::imshow("Hik(red circle)", hik_frame);
+            cv::putText(hik_frame,
+                        std::string("Phase:") + std::to_string(phase) +
+                        (circle ? " [CIRCLE]" : ""),
+                        {20,50}, cv::FONT_HERSHEY_SIMPLEX, 1,
+                        circle ? cv::Scalar{0,0,255} : cv::Scalar{0,255,0}, 2);
+            cv::imshow("Hik (red circle)", hik_frame);
         }
+
         if (cv::waitKey(1) == 27) break;
         usleep(20000);
     }
