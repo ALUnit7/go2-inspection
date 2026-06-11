@@ -1,13 +1,10 @@
 #pragma once
 #include "core/StateBase.hpp"
-#include <sys/socket.h>
-class StateObstacleAvoid : public StateBase {
+class StateReturnHome : public StateBase {
 public:
     void enter(RobotContext& ctx) override;
     int  update(RobotContext& ctx) override;
     void exit(RobotContext& ctx) override;
 private:
-    int  sock_fd_    = -1;
-    int  stable_cnt_ = 0;  // valid=true 稳定帧数
-    bool nav_online_ = false;
+    int ticks_ = 0;
 };

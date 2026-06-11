@@ -21,7 +21,7 @@
 #include "../src/perception/YoloDetector.cpp"
 
 // ── 调参区 ────────────────────────────────────────────────────────────────────
-static const std::string MODEL_PATH  = "../models/warning_sign.onnx";
+static const std::string MODEL_PATH  = "/home/wzl/GO2_RCOM/models/warning_sign.onnx";
 static const float CONF_THRESH       = 0.25f;
 static const float NMS_THRESH        = 0.45f;
 static const int   INPUT_SIZE        = 512;

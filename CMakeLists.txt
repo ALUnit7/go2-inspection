@@ -14,8 +14,11 @@ find_library(ONNXRUNTIME_LIB onnxruntime HINTS /usr/local/lib /opt/onnxruntime/l
 find_path(ONNXRUNTIME_INCLUDE onnxruntime_cxx_api.h
     HINTS /usr/local/include/onnxruntime /opt/onnxruntime/include)
 
-# ── 源文件 ────────────────────────────────────────────────────────────────────
+# ── 源文件（排除只在 test 中使用的感知模块）────────────────────────────────
 file(GLOB_RECURSE SOURCES src/*.cpp)
+list(FILTER SOURCES EXCLUDE REGEX ".*HikCamera\\.cpp$")
+list(FILTER SOURCES EXCLUDE REGEX ".*ArucoDetector\\.cpp$")
+list(FILTER SOURCES EXCLUDE REGEX ".*YoloDetector\\.cpp$")
 
 add_executable(go2_inspection ${SOURCES})
 
