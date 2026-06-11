@@ -2,20 +2,20 @@
 #include <opencv2/core.hpp>
 
 struct ObstacleConfig {
-    int   near_row   = 1000;  // 近处采样行（越大越靠近底部，触发越晚）
-    int   far_row    = 700;   // 远处采样行
-    float white_thresh = 0.10f; // ROI内白色占比低于此值触发
-    int   confirm_frames = 3;   // 连续N帧才确认，防误触
+    int   near_row      = 1000;
+    int   far_row       = 700;
+    float white_thresh  = 0.10f;
+    int   confirm_frames= 3;
 };
 
 class ObstacleDetector {
 public:
     explicit ObstacleDetector(const ObstacleConfig& cfg = {}) : cfg_(cfg), counter_(0) {}
 
-    // binary: THRESH_BINARY_INV 后的二值图
-    // start_x: 扫描起点（传入 LineDetector 的 last_cx_，-1=用图像中心）
-    // vis: 不为空则画出 ROI 梯形
-    bool detect(const cv::Mat& binary, cv::Mat* vis = nullptr, int start_x = -1);
+    // binary:   THRESH_BINARY_INV 二值图
+    // line_cx:  LineDetector.lastCx()，线中心 x（复用线检测的扫描逻辑）
+    // vis:      可视化输出
+    bool detect(const cv::Mat& binary, cv::Mat* vis = nullptr, int line_cx = -1);
 
     void reset() { counter_ = 0; }
     ObstacleConfig& config() { return cfg_; }
@@ -23,4 +23,7 @@ public:
 private:
     ObstacleConfig cfg_;
     int counter_;
+
+    // 复用 LineDetector 同款扫描逻辑：从 start_x 出发找白色区域左右边界
+    bool scanRow(const cv::Mat& bin, int row, int start_x, int& L, int& R) const;
 };
