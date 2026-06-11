@@ -100,6 +100,7 @@ int main(int argc, char** argv) {
     Phase phase = FOLLOW;
     float yaw_start=0;
     int sign_type=-1, recognize_ticks=0, after_ticks=0;
+    LineDetector line_det(THRESH, 800, CLOSE_K, OPEN_K);  // 循环外，保留 last_cx_
 
     printf("Running. Hik=red circle(ground), GO2cam=YOLO(sign).\n");
     std::vector<uint8_t> buf;
@@ -111,7 +112,6 @@ int main(int argc, char** argv) {
         bool circle = hik_ok && detectRedCircle(hik_frame);
 
         // 寻迹辅助（FOLLOW/CIRCLE_SEEN/AFTER_CIRCLE 阶段共用）
-        LineDetector line_det(THRESH, 800, CLOSE_K, OPEN_K);
         auto doLineFollow = [&]() {
             LineResult r = line_det.detect(hik_frame);
             if (r.valid) {
