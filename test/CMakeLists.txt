@@ -80,8 +80,8 @@ target_link_libraries(t18_climb_stairs PRIVATE unitree_sdk2 ${OpenCV_LIBS})
 
 # t19: 检测平台完整流程（连机器人）
 add_executable(t19_detection_point t19_detection_point.cpp)
-target_include_directories(t19_detection_point PRIVATE ${OpenCV_INCLUDE_DIRS} ../src /usr/local/include)
-target_link_libraries(t19_detection_point PRIVATE unitree_sdk2 ${OpenCV_LIBS} /usr/local/lib/libonnxruntime.so)
+target_include_directories(t19_detection_point PRIVATE ${OpenCV_INCLUDE_DIRS} ../src /usr/local/include ${HIK_INC})
+target_link_libraries(t19_detection_point PRIVATE unitree_sdk2 ${OpenCV_LIBS} /usr/local/lib/libonnxruntime.so ${HIK_LIBS})
 
 # t20: 直角弯检测+计数（连机器人+赛道）
 add_executable(t20_corner_count t20_corner_count.cpp)
